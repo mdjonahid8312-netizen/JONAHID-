@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviator Admin & Server Control</title>
+    <style>
+        :root { --bg: #0b0e14; --card: #161b26; --green: #43a047; --red: #e53935; --text: #fff; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+        .card { background: var(--card); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 20px; }
+        h2 { margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
+        .status { font-size: 1.2rem; margin: 10px 0; color: var(--green); font-weight: bold; }
+        .mult-val { font-size: 2.5rem; font-weight: bold; margin: 15px 0; }
+        .btn { padding: 10px 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; }
+        .btn-crash { background: var(--red); width: 100%; padding: 15px; font-size: 1.1rem; }
+        .btn-approve { background: var(--green); }
+        .btn-reject { background: var(--red); }
+        .req-item { background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .req-info { font-size: 0.85rem; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+    <h1 style="text-align: center; margin-bottom: 20px; color: #e53935;">✈️ AVIATOR MASTER ADMIN PANEL</h1>
+
+    <div class="grid">
+        <!-- Game Control Panel -->
+        <div class="card">
+            <h2>গেম কন্ট্রোল সার্ভার</h2>
+            <div class="status" id="server-status">Status: Initializing...</div>
+            <div class="mult-val" id="current-mult">1.00x</div>
+            <button class="btn btn-crash" id="force-crash-btn">🔥 FORCE CRASH NOW</button>
+        </div>
+
+        <!-- Deposit Requests Panel -->
+        <div class="card">
+            <h2>ডিপোজিট রিকোয়েস্ট (Deposit Requests)</h2>
+            <div id="dep-list">কোনো পেন্ডিং ডিপোজিট নেই</div>
+        </div>
+
+        <!-- Withdraw Requests Panel -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <h2>উইথড্র রিকোয়েস্ট (Withdraw Requests)</h2>
+            <div id="with-list">কোনো পেন্ডিং উইথড্র নেই</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, update, onValue, remove, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAyTOnCm5IuPcB-yvGjFl3KbwRVxNrcNSY",
+            authDomain: "ff-to-gaming-4ea1b.firebaseapp.com",
+            databaseURL: "https://ff-to-gaming-4ea1b-default-rtdb.firebaseio.com",
+            projectId: "ff-to-gaming-4ea1b",
+            storageBucket: "ff-to-gaming-4ea1b.appspot.com",
+            messagingSenderId: "816776130875",
+            appId: "1:816776130875:web:c3e7984e0de53cbd89871e"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        let isForceCrashed = false;
+        let gameLoopActive = false;
+
+        const serverStatus = document.getElementById('server-status');
+        const currentMultDisplay = document.getElementById('current-mult');
+        const forceCrashBtn = document.getElementById('force-crash-btn');
+
+        forceCrashBtn.addEventListener('click', () => { isForceCrashed = true; });
+
+        function generateCrashPoint() {
+            const e = Math.random();
+            if (e < 0.08) return 1.00;
+            return parseFloat((1 + Math.pow(e, 2) * 15).toFixed(2));
+        }
+
+        async function runAutoGameLoop() {
+            if (gameLoopActive) return;
+            gameLoopActive = true;
+
+            while (true) {
+                isForceCrashed = false;
+                serverStatus.innerText = "Status: Waiting for players...";
+                
+                for (let i = 5; i > 0; i--) {
+                    await set(ref(db, 'gameState'), { status: 'waiting', countdown: i, multiplier: 1.00, startTime: 0 });
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                const crashPoint = generateCrashPoint();
+                const startTime = Date.now();
+                serverStatus.innerText = `Status: Running (Crash target: ${crashPoint}x)`;
+
+                await set(ref(db, 'gameState'), { status: 'running', crashPoint: crashPoint, startTime: startTime });
+
+                let currentMult = 1.00;
+                while (currentMult < crashPoint && !isForceCrashed) {
+                    let elapsed = (Date.now() - startTime) / 1000;
+                    currentMult = parseFloat((1 + Math.pow(elapsed, 1.7) * 0.12).toFixed(2));
+                    currentMultDisplay.innerText = currentMult.toFixed(2) + "x";
+                    
+                    // নেটওয়ার্ক ল্যাগ কমানোর জন্য নির্দিষ্ট সময় পর ডাটাবেসে সিঙ্ক
+                    await update(ref(db, 'gameState/live'), { multiplier: currentMult });
+                    await new Promise(r => setTimeout(r, 150));
+                }
+
+                serverStatus.innerText = "Status: CRASHED!";
+                await set(ref(db, 'gameState'), { status: 'crashed', multiplier: currentMult });
+                await new Promise(r => setTimeout(r, 3000));
+            }
+        }
+
+        runAutoGameLoop();
+
+        // Deposit Manager
+        onValue(ref(db, 'depositRequests'), (snapshot) => {
+            const depList = document.getElementById('dep-list');
+            depList.innerHTML = '';
+            const data = snapshot.val();
+            if (!data) return depList.innerText = 'কোনো পেন্ডিং ডিপোজিট নেই';
+
+            Object.keys(data).forEach(key => {
+                const req = data[key];
+                if (req.status === 'pending') {
+                    const div = document.createElement('div');
+                    div.className = 'req-item';
+                    div.innerHTML = `
+                        <div class="req-info">
+                            <b>User:</b> ${req.email}<br>
+                            <b>Amount:</b> ৳${req.amount} | <b>TrxID:</b> ${req.trxId}
+                        </div>
+                        <div>
+                            <button class="btn btn-approve" onclick="approveDep('${key}', '${req.uid}', ${req.amount})">Approve</button>
+                            <button class="btn btn-reject" onclick="rejectReq('depositRequests', '${key}')">Reject</button>
+                        </div>
+                    `;
+                    depList.appendChild(div);
+                }
+            });
+        });
+
+        // Withdraw Manager
+        onValue(ref(db, 'withdrawRequests'), (snapshot) => {
+            const withList = document.getElementById('with-list');
+            withList.innerHTML = '';
+            const data = snapshot.val();
+            if (!data) return withList.innerText = 'কোনো পেন্ডিং উইথড্র নেই';
+
+            Object.keys(data).forEach(key => {
+                const req = data[key];
+                if (req.status === 'pending') {
+                    const div = document.createElement('div');
+                    div.className = 'req-item';
+                    div.innerHTML = `
+                        <div class="req-info">
+                            <b>User:</b> ${req.email}<br>
+                            <b>Amount:</b> ৳${req.amount} | <b>To:</b> ${req.receiver}
+                        </div>
+                        <div>
+                            <button class="btn btn-approve" onclick="approveWith('${key}')">Approve Paid</button>
+                            <button class="btn btn-reject" onclick="rejectWith('${key}', '${req.uid}', ${req.amount})">Refund & Reject</button>
+                        </div>
+                    `;
+                    withList.appendChild(div);
+                }
+            });
+        });
+
+        window.approveDep = async (key, uid, amount) => {
+            await runTransaction(ref(db, `users/${uid}/balance`), (b) => (b || 0) + amount);
+            await remove(ref(db, `depositRequests/${key}`));
+        };
+
+        window.rejectReq = async (path, key) => {
+            await remove(ref(db, `${path}/${key}`));
+        };
+
+        window.approveWith = async (key) => {
+            await remove(ref(db, `withdrawRequests/${key}`));
+        };
+
+        window.rejectWith = async (key, uid, amount) => {
+            await runTransaction(ref(db, `users/${uid}/balance`), (b) => (b || 0) + amount);
+            await remove(ref(db, `withdrawRequests/${key}`));
+        };
+    </script>
+</body>
+</html>
