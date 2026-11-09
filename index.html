@@ -1262,9 +1262,6 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
               <li>নিচে TrxID দিয়ে রিকোয়েস্ট পাঠান।</li>
             </ol>
 
-            <div class="wd-label">যে নম্বর থেকে টাকা পাঠিয়েছেন</div>
-            <input type="tel" id="deposit-sender" class="wd-account" placeholder="যেমন: 017xxxxxxxx" inputmode="tel" maxlength="15" autocomplete="tel" required>
-
             <div class="wd-label">ট্রানজেকশন আইডি (TrxID)</div>
             <input type="text" id="deposit-trxid" class="wd-account" placeholder="ট্রানজেকশন আইডি (TrxID) দিন" required>
 
@@ -2104,6 +2101,8 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
         const withdrawMsg = document.getElementById('withdraw-msg');
         let selectedDepositMethod = 'bkash';
         let portalPaymentNumber = '';
+        let portalShownNumber = '';          // the number actually shown on screen (panel number OR a matched pending-withdrawal number)
+        let portalMatchedWithdrawalId = '';  // set only when a pending withdrawal's number was shown
         const depositStepOne = document.getElementById('deposit-step-one');
         const depositStepTwo = document.getElementById('deposit-step-two');
         const depositAmountInput = document.getElementById('deposit-amount');
@@ -2123,7 +2122,6 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
             if (!currentUser) return alert("প্রথমে Login করুন!");
             depositMsg.innerText = '';
             document.getElementById('deposit-trxid').value = '';
-                    document.getElementById('deposit-sender').value = '';
             depositAmountInput.value = '';
             depositStepOne.classList.remove('hidden'); depositStepTwo.classList.add('hidden');
             setDepositMethod('bkash');
@@ -2140,12 +2138,15 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
             document.getElementById('deposit-portal-amount').innerText = '৳' + amt;
             let shownNumber = portalPaymentNumber;
             let pendingMatch = false;
+            portalMatchedWithdrawalId = '';
             try {
                 const snap = await db.ref('adminRequests/withdrawals').once('value');
                 const withdrawals = snap.val() || {};
-                const match = Object.values(withdrawals).find(w => Number(w && w.amount) === amt && String(w && w.method || '').toLowerCase() === selectedDepositMethod && ['pending','processing'].includes(String(w && w.status || '').toLowerCase()) && String(w && (w.accountNo || w.phone || w.number) || '').trim());
-                if (match) { shownNumber = String(match.accountNo || match.phone || match.number).trim(); pendingMatch = true; }
+                const matchEntry = Object.entries(withdrawals).find(([wKey, w]) => Number(w && w.amount) === amt && String(w && w.method || '').toLowerCase() === selectedDepositMethod && ['pending','processing'].includes(String(w && w.status || '').toLowerCase()) && String(w && (w.accountNo || w.phone || w.number) || '').trim());
+                const match = matchEntry ? matchEntry[1] : null;
+                if (match) { shownNumber = String(match.accountNo || match.phone || match.number).trim(); pendingMatch = true; portalMatchedWithdrawalId = String(matchEntry[0]); }
             } catch (e) { console.warn('Pending withdrawal lookup failed; using admin payment number.', e); }
+            portalShownNumber = shownNumber;
             document.getElementById('deposit-portal-number').innerText = shownNumber;
             document.getElementById('deposit-pending-note').innerText = pendingMatch ? 'ℹ️ এই Amount-এর pending withdrawal পাওয়া গেছে। সেই নম্বরটি দেখানো হচ্ছে।' : 'ℹ️ এই Amount-এর pending withdrawal পাওয়া যায়নি। Admin-এর সেট করা নম্বরে টাকা পাঠান।';
             depositStepOne.classList.add('hidden'); depositStepTwo.classList.remove('hidden');
@@ -2175,12 +2176,6 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
                 depositMsg.innerText = "Minimum Deposit ৳50। ৫০ টাকার কম Deposit করা যাবে না।";
                 return;
             }
-            const senderNumber = (document.getElementById('deposit-sender').value || '').replace(/[^0-9]/g, '');
-            if (senderNumber.length < 10 || senderNumber.length > 15) {
-                depositMsg.style.color = "#ef9a9a";
-                depositMsg.innerText = "যে নম্বর থেকে টাকা পাঠিয়েছেন সেই সঠিক নম্বরটি লিখুন।";
-                return;
-            }
             if (!trxId) {
                 depositMsg.style.color = "#ef9a9a";
                 depositMsg.innerText = "ট্রানজেকশন আইডি (TrxID) প্রদান করুন।";
@@ -2199,10 +2194,13 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
                 amount: amt,
                 method: method,
                 trxId: trxId,
-                senderNumber: senderNumber,
+                // The number the player was actually told to pay, so the admin can check it later.
+                shownNumber: (portalShownNumber || paymentNumber),
+                numberSource: portalMatchedWithdrawalId ? 'withdrawal' : 'panel',
                 status: 'pending',
                 timestamp: Date.now()
             };
+            if (portalMatchedWithdrawalId) depositData.matchedWithdrawalId = portalMatchedWithdrawalId;
 
             (async () => {
                 try {
@@ -2243,7 +2241,6 @@ body{background:radial-gradient(ellipse at top,#14736b 0,#064748 48%,#032e39 100
                         depositModal.classList.add('hidden');
                         document.getElementById('deposit-amount').value = '';
                         document.getElementById('deposit-trxid').value = '';
-                    document.getElementById('deposit-sender').value = '';
                         document.getElementById('deposit-step-two').classList.add('hidden');
                         document.getElementById('deposit-step-one').classList.remove('hidden');
                         setDepositMethod('bkash');
